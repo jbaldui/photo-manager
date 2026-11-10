@@ -1,0 +1,12 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Local data (DB, thumbnails, embeddings, models, exports)
+data/
+backend/tests/fixtures/generated/
+# Frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo
