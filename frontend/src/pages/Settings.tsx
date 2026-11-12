@@ -21,6 +21,22 @@ const LABELS: Record<string, [string, string]> = {
   orb_min_ratio: ["ORB min. match ratio", "Inliers / keypoints needed to confirm an edit."],
 };
 
+const LEVEL_NAMES: Record<number, string> = {
+  1: "Identical only",
+  2: "Very strict",
+  3: "Strict",
+  4: "Fairly strict",
+  5: "Balanced (default)",
+  6: "Fairly loose",
+  7: "Loose",
+  8: "Very loose",
+  9: "Permissive",
+  10: "Everything alike",
+};
+
+const same = (a: Record<string, number>, b: Record<string, number>) =>
+  Object.keys(b).every((k) => a[k] !== undefined && Math.abs(a[k] - b[k]) < 1e-6);
+
 export default function Settings() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["settings"], queryFn: api.settings });
@@ -37,6 +53,16 @@ export default function Settings() {
     },
     onSuccess: () => qc.invalidateQueries(),
   });
+  const presets = data?.presets ?? {};
+  const level = Object.keys(presets).map(Number).find((l) => same(vals, presets[String(l)])) ?? null;
+  const [pick, setPick] = useState(5);
+  useEffect(() => {
+    if (level) setPick(level);
+  }, [level]);
+  const apply = (l: number) => {
+    setPick(l);
+    if (presets[String(l)]) setVals(presets[String(l)]);
+  };
   const exp = useMutation({ mutationFn: api.exportData, onSuccess: setExported });
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats });
   const discards = stats?.decisions.find((d) => d.key === "discard")?.count ?? 0;
@@ -72,7 +98,31 @@ export default function Settings() {
         <div className="card">
           <div className="row" style={{ marginBottom: 12 }}>
             <h2 className="grow" style={{ margin: 0 }}>Matching thresholds</h2>
-            <button className="small" onClick={() => data && setVals(data.defaults)}>Reset defaults</button>
+            <button className="small" onClick={() => data && (setVals(data.defaults), setPick(5))}>Reset defaults</button>
+          </div>
+          <div className="preset">
+            <div className="row">
+              <strong className="grow">Similarity level</strong>
+              <span className={`badge ${level ? "accent" : "warn"}`}>{level ? `${level} · ${LEVEL_NAMES[level]}` : "Custom values"}</span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={10}
+              step={1}
+              value={pick}
+              onChange={(e) => apply(Number(e.target.value))}
+              aria-label="Similarity level"
+              aria-valuetext={LEVEL_NAMES[pick]}
+            />
+            <div className="row sub" style={{ justifyContent: "space-between", fontSize: 11 }}>
+              <span>1 · only near-identical images</span>
+              <span>10 · anything vaguely alike</span>
+            </div>
+            <p className="sub" style={{ fontSize: 12, margin: "6px 0 0" }}>
+              Sets every threshold below in one go (hash distances, CLIP similarity, ORB and OCR matching). You can still fine-tune each value
+              afterwards; the level then shows “Custom”. Higher levels find more groups but include more false matches.
+            </p>
           </div>
           <dl className="kv" style={{ gap: "10px 12px", alignItems: "center" }}>
             {Object.entries(LABELS).map(([k, [label, help]]) => (

@@ -326,3 +326,21 @@ def test_enhance_group_api(lib):
     assert client.post(f"/api/generated/{res['id']}/save", json={"dest": str(photos)}).status_code == 400
     assert client.delete(f"/api/generated/{res['id']}").status_code == 200
     assert client.get(f"/api/generated/{res['id']}").status_code == 404
+
+
+# ---------------------------------------------------------------- similarity scale
+def test_similarity_scale_presets():
+    from app import config
+
+    assert config.similarity_preset(5) == {k: v for k, v in config.DEFAULT_SETTINGS.items()}
+    keys = list(config.DEFAULT_SETTINGS)
+    levels = [config.similarity_preset(i) for i in range(1, 11)]
+    for k in keys:
+        vals = [p[k] for p in levels]
+        loosening = vals == sorted(vals) or vals == sorted(vals, reverse=True)
+        assert loosening and vals[0] != vals[-1], k                       # monotonic, and it does something
+    for p in levels:                                                       # internal ordering stays valid
+        assert p["clip_candidate"] <= p["clip_near"] <= p["clip_similar"] <= p["clip_duplicate"]
+        assert p["phash_duplicate"] <= p["phash_candidate"] and p["dhash_duplicate"] <= p["phash_candidate"] + 2
+    assert config.similarity_preset(1)["clip_similar"] > config.similarity_preset(10)["clip_similar"]
+    assert config.similarity_preset(1)["phash_duplicate"] < config.similarity_preset(10)["phash_duplicate"]

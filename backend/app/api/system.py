@@ -144,7 +144,8 @@ def scan_history(limit: int = 20):
 # ---------------------------------------------------------------- settings
 @router.get("/settings")
 def get_settings():
-    return {"values": db.get_settings(), "defaults": config.DEFAULT_SETTINGS, "data_dir": str(config.DATA_DIR), "workers": config.WORKERS}
+    return {"values": db.get_settings(), "defaults": config.DEFAULT_SETTINGS,
+            "presets": {str(i): config.similarity_preset(i) for i in range(1, 11)}, "data_dir": str(config.DATA_DIR), "workers": config.WORKERS}
 
 
 @router.put("/settings")

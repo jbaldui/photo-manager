@@ -378,7 +378,7 @@ export const api = {
   autoDecide: (groupId: number) => req("POST", `/api/groups/${groupId}/auto-decide`),
   autoDecideTier: (tier: Tier) => req<{ groups_decided: number }>("POST", "/api/groups/auto-decide-tier", { tier }),
   settings: () =>
-    req<{ values: Record<string, number>; defaults: Record<string, number>; data_dir: string; workers: number }>("GET", "/api/settings"),
+    req<{ values: Record<string, number>; defaults: Record<string, number>; presets: Record<string, Record<string, number>>; data_dir: string; workers: number }>("GET", "/api/settings"),
   putSettings: (values: Record<string, number>) => req("PUT", "/api/settings", values),
   exportData: (kind: "csv" | "json") => req<{ path: string; name: string; url: string }>("POST", "/api/export", { kind }),
   organizePreview: (o: OrganizeOptions) => req<OrganizePreview>("POST", "/api/organize/preview", o),

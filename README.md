@@ -81,7 +81,7 @@ The scores from each method are combined into five tiers, from strictest to loos
 
 Duplicates are merged transitively (union-find). The looser tiers use star clustering, so every member must be directly similar to the group's centre, and chains of loosely related photos are not merged. The best copy in each group is chosen by resolution, presence of a real capture date and metadata, then age.
 
-All thresholds can be adjusted in **Settings**, and grouping can be re-run without re-analysing any photos.
+All thresholds can be adjusted in **Settings**, either with a single **similarity level** slider (1 = only near-identical images, 5 = default, 10 = very permissive) or one by one, and grouping can be re-run without re-analysing any photos.
 
 ---
 

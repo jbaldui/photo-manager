@@ -46,5 +46,36 @@ DEFAULT_SETTINGS: dict[str, float] = {
     "orb_min_ratio": 0.03,
 }
 
+# Quick "similarity strictness" scale, 1 (only near-identical images) .. 10 (very permissive).
+# Every setting has an anchor at level 1, 5 and 10; level 5 equals DEFAULT_SETTINGS and the levels in
+# between are interpolated, so each parameter moves in the right direction by its own amount.
+SIMILARITY_ANCHORS: dict[str, tuple[float, float, float]] = {   # (level 1, level 5, level 10)
+    "phash_candidate": (6, 12, 20),
+    "phash_duplicate": (2, 6, 12),
+    "dhash_duplicate": (4, 10, 18),
+    "rotated_duplicate": (1, 4, 8),
+    "trimmed_near": (2, 6, 12),
+    "clip_candidate": (0.94, 0.88, 0.80),
+    "clip_duplicate": (0.99, 0.97, 0.94),
+    "clip_near": (0.96, 0.90, 0.84),
+    "clip_similar": (0.97, 0.92, 0.86),
+    "clip_k": (8, 16, 32),
+    "text_min_words": (5, 3, 2),
+    "text_jaccard": (0.95, 0.8, 0.6),
+    "orb_min_inliers": (40, 25, 15),
+    "orb_min_ratio": (0.06, 0.03, 0.015),
+}
+
+
+def similarity_preset(level: int) -> dict[str, float]:
+    level = max(1, min(10, int(level)))
+    out: dict[str, float] = {}
+    for key, (lo, mid, hi) in SIMILARITY_ANCHORS.items():
+        a, b, t = (lo, mid, (level - 1) / 4) if level <= 5 else (mid, hi, (level - 5) / 5)
+        v = a + (b - a) * t
+        out[key] = round(v) if float(DEFAULT_SETTINGS[key]).is_integer() else round(v, 4)
+    return out
+
+
 for d in (DATA_DIR, THUMB_DIR, MODEL_DIR, EXPORT_DIR, GENERATED_DIR):
     d.mkdir(parents=True, exist_ok=True)
