@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, GroupMember } from "../api";
+import { api, ApiError, GroupMember } from "../api";
+import EnhanceModal from "../components/EnhanceModal";
+import RemoveModal from "../components/RemoveModal";
 import { Lightbox, ScoreBadges } from "../components/ui";
 import { bytes, DATE_SOURCE_LABEL, dateTime, epoch, TIER_INFO } from "../format";
 
@@ -24,7 +26,13 @@ export default function GroupDetail() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [zoom, setZoom] = useState<string | null>(null);
-  const { data: g, isLoading } = useQuery({ queryKey: ["group", id], queryFn: () => api.group(Number(id)) });
+  const [moving, setMoving] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const { data: g, isLoading, error } = useQuery({
+    queryKey: ["group", id],
+    queryFn: () => api.group(Number(id)),
+    retry: (n, e) => !(e instanceof ApiError && e.status === 404) && n < 2,
+  });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["group", id] });
     qc.invalidateQueries({ queryKey: ["groups"] });
@@ -33,9 +41,23 @@ export default function GroupDetail() {
   const decide = useMutation({ mutationFn: (a: { ids: number[]; d: "keep" | "discard" | "clear" }) => api.decide(a.ids, a.d), onSuccess: refresh });
   const auto = useMutation({ mutationFn: () => api.autoDecide(Number(id)), onSuccess: refresh });
 
+  if (error instanceof ApiError && error.status === 404)
+    return (
+      <div className="page">
+        <div className="card empty">
+          <h2>This group no longer exists</h2>
+          <p>Its duplicates were removed or the groups were rebuilt, so there is nothing left to compare here.</p>
+          <div className="row" style={{ justifyContent: "center" }}>
+            <Link className="btn primary" to="/groups">Back to duplicates</Link>
+            <Link className="btn" to="/quarantine">Quarantine</Link>
+          </div>
+        </div>
+      </div>
+    );
   if (isLoading || !g) return <div className="page"><p className="sub">Loading…</p></div>;
   const members = g.members ?? [];
   const differs = (f: Field) => new Set(members.map(f.get)).size > 1;
+  const discarded = members.filter((m) => m.decision === "discard").length;
 
   return (
     <div className="page">
@@ -52,10 +74,18 @@ export default function GroupDetail() {
           </p>
         </div>
         <div className="row">
+          {g.tier !== "text" && (
+            <button onClick={() => setEnhancing(true)} title="Merge the copies into one improved image (new file; originals untouched)">
+              ✨ Enhance
+            </button>
+          )}
           <button onClick={() => decide.mutate({ ids: members.map((m) => m.id), d: "clear" })}>Clear decisions</button>
           <button className="primary" onClick={() => auto.mutate()} title="Keep the highest-quality copy, mark the rest discard">
             Keep best, discard rest
           </button>
+          {discarded > 0 && (
+            <button className="danger" onClick={() => setMoving(true)}>Move {discarded} discarded to quarantine…</button>
+          )}
         </div>
       </div>
       {g.tier === "text" && (
@@ -108,6 +138,8 @@ export default function GroupDetail() {
         ))}
       </div>
       {zoom && <Lightbox src={zoom} onClose={() => setZoom(null)} />}
+      {moving && <RemoveModal groupId={g.id} onClose={() => setMoving(false)} />}
+      {enhancing && <EnhanceModal groupId={g.id} onClose={() => setEnhancing(false)} />}
     </div>
   );
 }

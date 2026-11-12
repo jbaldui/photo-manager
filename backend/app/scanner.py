@@ -100,7 +100,7 @@ def scan_roots(scan_id: int, ctx) -> dict:
             if prev is None:
                 new_rows.append((root_id, rel, entry.name, ext, st.st_size, st.st_mtime, st.st_ctime, scan_id))
                 stats["new"] += 1
-            elif prev[1] != st.st_size or abs(prev[2] - st.st_mtime) > 1e-6 or prev[3] == "missing":
+            elif prev[1] != st.st_size or abs(prev[2] - st.st_mtime) > 1e-6 or prev[3] in ("missing", "removed"):
                 changed_rows.append((st.st_size, st.st_mtime, st.st_ctime, scan_id, prev[0]))
                 stats["changed"] += 1
             else:
@@ -113,7 +113,7 @@ def scan_roots(scan_id: int, ctx) -> dict:
             with db.tx() as c:
                 cur = c.execute(
                     "UPDATE files SET status='missing' WHERE root_id=? AND (last_seen_scan IS NULL OR last_seen_scan<>?)"
-                    " AND status<>'missing'",
+                    " AND status NOT IN ('missing', 'removed')",
                     (root_id, scan_id),
                 )
                 stats["missing"] += cur.rowcount

@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
@@ -54,23 +55,17 @@ export default function Settings() {
         <div className="card">
           <h2>Export</h2>
           <p className="sub" style={{ marginBottom: 12 }}>
-            The app never moves or deletes your photos. Export your decisions and act on them yourself.
+            Export every group with its members and your keep/discard decisions. To remove discarded photos, use{" "}
+            <Link to="/quarantine">Quarantine</Link>: the app moves them for you and can undo it.
           </p>
           <div className="row">
             <button onClick={() => exp.mutate("csv")}>Groups as CSV</button>
             <button onClick={() => exp.mutate("json")}>Groups as JSON</button>
-            <button onClick={() => exp.mutate("script")} disabled={!discards}>
-              Move-script for {num(discards)} discarded
-            </button>
+            {discards > 0 && <Link className="btn" to="/quarantine">Move {num(discards)} discarded to quarantine…</Link>}
           </div>
           {exported && (
             <div className="callout" style={{ marginTop: 12 }}>
               Saved <span className="mono">{exported.path}</span> · <a href={exported.url}>download</a>
-              {exported.name.endsWith(".sh") && (
-                <p style={{ margin: "6px 0 0" }}>
-                  Review it, then run <code>bash {exported.name} /path/to/quarantine</code>. It moves (never deletes) files, so it can be undone.
-                </p>
-              )}
             </div>
           )}
         </div>

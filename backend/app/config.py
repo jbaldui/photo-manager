@@ -10,6 +10,8 @@ DB_PATH = DATA_DIR / "library.db"
 THUMB_DIR = DATA_DIR / "thumbs"
 MODEL_DIR = Path(os.environ.get("PM_MODEL_DIR", DATA_DIR / "models")).resolve()
 EXPORT_DIR = DATA_DIR / "exports"
+GENERATED_DIR = DATA_DIR / "generated"
+DEFAULT_QUARANTINE = Path.home() / "Photo Manager Quarantine"
 EMBEDDINGS_PATH = DATA_DIR / "embeddings.f16"
 FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 
@@ -44,5 +46,5 @@ DEFAULT_SETTINGS: dict[str, float] = {
     "orb_min_ratio": 0.03,
 }
 
-for d in (DATA_DIR, THUMB_DIR, MODEL_DIR, EXPORT_DIR):
+for d in (DATA_DIR, THUMB_DIR, MODEL_DIR, EXPORT_DIR, GENERATED_DIR):
     d.mkdir(parents=True, exist_ok=True)

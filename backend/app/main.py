@@ -6,10 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db
-from .api import groups, library, organize, system
+from . import autoprocess, config, db, maintenance
+from .api import auto, enhance, groups, library, organize, removals, system
 
 db.init()
+_repaired = maintenance.repair()   # heal leftovers from older versions (e.g. stale duplicate groups)
+if _repaired:
+    print(f"Photo Manager: repaired library: {_repaired}", flush=True)
+autoprocess.seed_presets()
 
 app = FastAPI(title="Photo Manager", version="0.1.0")
 app.add_middleware(
@@ -22,6 +26,9 @@ app.include_router(system.router)
 app.include_router(library.router)
 app.include_router(groups.router)
 app.include_router(organize.router)
+app.include_router(removals.router)
+app.include_router(auto.router)
+app.include_router(enhance.router)
 
 # Serve the built React app (npm run build) so a single process is enough in "production".
 if config.FRONTEND_DIST.is_dir():

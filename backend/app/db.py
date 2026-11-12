@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS files(
   size INTEGER NOT NULL,
   mtime REAL NOT NULL,
   ctime REAL,
-  status TEXT NOT NULL DEFAULT 'pending',   -- pending | ok | error | missing
+  status TEXT NOT NULL DEFAULT 'pending',   -- pending | ok | error | missing | removed (moved to quarantine)
   error TEXT,
   last_seen_scan INTEGER,
   sha256 TEXT,
@@ -128,6 +128,57 @@ CREATE TABLE IF NOT EXISTS settings(
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Free-form app state (last quarantine folder, ...). JSON values.
+CREATE TABLE IF NOT EXISTS kv(
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- Quarantine: every move of an original is logged *before* it happens, so it can always be undone.
+CREATE TABLE IF NOT EXISTS removal_batches(
+  id INTEGER PRIMARY KEY,
+  created REAL NOT NULL,
+  dest TEXT NOT NULL,              -- batch folder inside the quarantine folder
+  reason TEXT,                     -- manual | auto:<pipeline name>
+  files INTEGER DEFAULT 0,
+  bytes INTEGER DEFAULT 0,
+  state TEXT,                      -- running | done | cancelled | error | restored | partially_restored
+  restored_at REAL
+);
+CREATE TABLE IF NOT EXISTS removals(
+  id INTEGER PRIMARY KEY,
+  batch_id INTEGER NOT NULL REFERENCES removal_batches(id) ON DELETE CASCADE,
+  file_id INTEGER,
+  root_path TEXT NOT NULL,
+  rel_path TEXT NOT NULL,
+  quarantine_path TEXT NOT NULL,
+  sha256 TEXT, size INTEGER, mtime REAL,
+  status TEXT NOT NULL,            -- pending | moved | restored | conflict | error | skipped
+  error TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_removals_batch ON removals(batch_id);
+
+-- Auto Process pipelines (config is JSON, see autoprocess.PipelineConfig).
+CREATE TABLE IF NOT EXISTS pipelines(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  config_json TEXT NOT NULL,
+  builtin INTEGER DEFAULT 0,
+  last_run REAL,
+  last_result TEXT
+);
+
+-- Enhanced images produced by the Enhance feature (stored under DATA_DIR/generated).
+CREATE TABLE IF NOT EXISTS generated(
+  id INTEGER PRIMARY KEY,
+  group_id INTEGER,
+  source_file_ids TEXT NOT NULL,   -- JSON list
+  path TEXT NOT NULL,              -- relative to GENERATED_DIR
+  params_json TEXT,
+  created REAL NOT NULL,
+  width INTEGER, height INTEGER
+);
 """
 
 _local = threading.local()
@@ -217,3 +268,16 @@ def put_settings(values: dict[str, float]) -> dict[str, float]:
                     (k, json.dumps(float(v))),
                 )
     return get_settings()
+
+
+def kv_get(key: str, default=None):
+    r = get().execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+    return json.loads(r["value"]) if r else default
+
+
+def kv_put(key: str, value) -> None:
+    with tx() as conn:
+        conn.execute(
+            "INSERT INTO kv(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, json.dumps(value)),
+        )

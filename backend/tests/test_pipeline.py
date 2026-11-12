@@ -103,11 +103,10 @@ def test_decisions_and_export(scanned):
     assert client.post(f"/api/groups/{g['id']}/auto-decide").status_code == 200
     detail = client.get(f"/api/groups/{g['id']}").json()
     assert sorted(m["decision"] for m in detail["members"]) == ["discard", "keep"]
-    for kind in ("csv", "json", "script"):
+    for kind in ("csv", "json"):
         r = client.post("/api/export", json={"kind": kind})
         assert r.status_code == 200 and Path(r.json()["path"]).is_file()
-    script = Path(client.post("/api/export", json={"kind": "script"}).json()["path"]).read_text()
-    assert "mv -n --" in script
+    assert client.post("/api/export", json={"kind": "script"}).status_code == 400   # replaced by in-app quarantine
 
 
 def test_rescan_is_incremental(scanned, fixture_dir):
@@ -238,6 +237,82 @@ def test_organize_grouped_scope_group_pattern(scanned, tmp_path):
     names = sorted(s["dst"].split("/")[-1] for s in pv["sample"])
     assert names == ["g0001_01_a_meme_caption.jpg", "g0001_02_b_same_caption.jpg"] or names == ["g0001_01_b_same_caption.jpg", "g0001_02_a_meme_caption.jpg"]
     assert sum(1 for s in pv["sample"] if s["is_best"]) == 1
+
+
+def _run(client, stages=None):
+    client.post("/api/scan", json={"stages": stages} if stages else {})
+    while client.get("/api/scan/status").json()["running"]:
+        time.sleep(0.2)
+    st = client.get("/api/scan/status").json()
+    assert st["error"] is None, st["error"]
+
+
+def test_remove_source_removes_its_duplicates(scanned, fixture_dir, tmp_path_factory):
+    import shutil
+
+    from app import config, db
+    from tests.make_fixtures import synthetic_photo
+
+    client, _ = scanned
+    before = client.get("/api/stats").json()
+    second = tmp_path_factory.mktemp("second_source")
+    shutil.copyfile(fixture_dir / "b.jpg", second / "b_copy_in_second_source.jpg")
+    shutil.copyfile(fixture_dir / "Screenshot_20240102-101112.png", second / "screenshot_copy.png")
+    synthetic_photo(9).save(second / "only_here.jpg", quality=90)
+    rid = client.post("/api/roots", json={"path": str(second)}).json()["id"]
+    _run(client)
+
+    def exact_b_members():
+        for g in client.get("/api/groups", params={"tier": "exact"}).json()["items"]:
+            names = {m["rel_path"] for m in client.get(f"/api/groups/{g['id']}").json()["members"]}
+            if "b.jpg" in names:
+                return names
+        return set()
+
+    assert "b_copy_in_second_source.jpg" in exact_b_members()
+    only_here = client.get("/api/photos", params={"q": "only_here"}).json()["items"][0]
+    client.put("/api/decisions", json={"file_ids": [only_here["id"]], "decision": "discard"})
+    conn = db.get()
+    orphan_sha = only_here["sha256"]
+    thumb = config.THUMB_DIR / conn.execute("SELECT thumb FROM images WHERE sha256=?", (orphan_sha,)).fetchone()[0]
+    assert thumb.is_file()
+
+    r = client.delete(f"/api/roots/{rid}").json()
+    assert r["removed"]["files"] == 3 and r["removed"]["images"] == 1 and r["removed"]["thumbnails"] == 1
+
+    # duplicates from the removed folder are gone from every group, groups were rebuilt
+    assert exact_b_members() == {"b.jpg", "download_b.jpg_large"}
+    assert conn.execute("SELECT COUNT(*) FROM group_members WHERE file_id NOT IN (SELECT id FROM files)").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM groups WHERE rep_file_id NOT IN (SELECT id FROM files)").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM decisions WHERE root_id=?", (rid,)).fetchone()[0] == 0
+    # content that existed only there is purged; shared content (screenshot) is kept
+    for table, col in (("images", "sha256"), ("ocr", "sha256"), ("pairs", "a"), ("pairs", "b"), ("orb_cache", "a"), ("orb_cache", "b")):
+        assert conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {col}=?", (orphan_sha,)).fetchone()[0] == 0, table
+    assert not thumb.exists()
+    assert client.get("/api/search", params={"q": "meeting notes"}).json()["items"]
+    after = client.get("/api/stats").json()
+    assert after["total_files"] == before["total_files"] and after["tiers"] == before["tiers"]
+    assert second.joinpath("only_here.jpg").is_file()        # files on disk untouched
+
+
+def test_startup_repair_clears_stale_groups(scanned):
+    """A folder removed by an older version left groups/images without files: repair must clear them."""
+    from app import db, maintenance
+
+    client, _ = scanned
+    before = client.get("/api/stats").json()
+    assert maintenance.repair() is None                      # consistent library -> no-op
+    with db.tx() as c:
+        c.execute("INSERT INTO groups(tier, size, rep_file_id, total_bytes, reclaimable_bytes) VALUES('exact', 4, 999999, 100, 75)")
+        c.execute("INSERT INTO images(sha256, phash, dhash, whash, thumb) VALUES('deadbeef', 1, 1, 1, NULL)")
+        c.execute("INSERT INTO ocr(sha256, text, lines_json, norm, n_words) VALUES('deadbeef', 'x', '[]', 'x', 1)")
+        c.execute("INSERT INTO decisions(root_id, rel_path, decision, updated_at) VALUES(424242, 'gone.jpg', 'keep', 0)")
+    assert maintenance.needs_repair()
+    r = maintenance.repair()
+    assert r["images"] == 1
+    assert not maintenance.needs_repair()
+    after = client.get("/api/stats").json()
+    assert after["tiers"] == before["tiers"] and after["images"] == before["images"]
 
 
 def test_originals_untouched(scanned, fixture_dir):
