@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import autoprocess, config, db, maintenance
-from .api import auto, enhance, groups, library, organize, removals, system
+from .api import auto, enhance, groups, library, organize, people, removals, system
 
 db.init()
 _repaired = maintenance.repair()   # heal leftovers from older versions (e.g. stale duplicate groups)
@@ -29,6 +29,7 @@ app.include_router(organize.router)
 app.include_router(removals.router)
 app.include_router(auto.router)
 app.include_router(enhance.router)
+app.include_router(people.router)
 
 # Serve the built React app (npm run build) so a single process is enough in "production".
 if config.FRONTEND_DIST.is_dir():

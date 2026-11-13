@@ -207,6 +207,7 @@ def test_organize_groups_layout(scanned, fixture_dir, tmp_path):
     assert len(copied) == 13
     dirs = {p.parent.name for p in copied}
     assert "_unique" in dirs and any(d.startswith("g0001_") for d in dirs)
+    assert all(p.parent.parent.name == "Groups" for p in copied if p.parent.name.startswith("g0"))
     # sniffed weird extension gets a real one
     assert any(p.name == "download_b.jpg" for p in copied)
     # a.jpg and its byte-identical copy end up in the same group folder

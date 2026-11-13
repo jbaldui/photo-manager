@@ -118,7 +118,7 @@ export function OrganizeFields({
           value={o.layout}
           onChange={(v) => set("layout", v)}
           options={[
-            { v: "groups", label: "One sub-folder per group", help: "g0001_<name>_(5)/ … for each group; photos with no match go to _unique/." },
+            { v: "groups", label: "One sub-folder per group", help: "Groups/g0001_<name>_(5)/ … for each group; photos with no match go to _unique/." },
             { v: "flat", label: "A single folder", help: "Every photo side by side in one folder." },
           ]}
         />

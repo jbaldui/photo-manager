@@ -351,7 +351,27 @@ const qs = (p: Record<string, unknown>) => {
   return s.toString();
 };
 
+export interface Person {
+  id: number;
+  name: string | null;
+  faces: number;
+  photos: number;
+  cover_face_id: number | null;
+  hidden: boolean;
+}
+export interface PeopleResponse {
+  people: Person[];
+  unassigned: number;
+  faces: number;
+  scanned: number;
+  threshold: number;
+}
+
 export const api = {
+  people: (includeHidden = false) => req<PeopleResponse>("GET", `/api/people?${qs({ include_hidden: includeHidden })}`),
+  patchPerson: (id: number, body: { name?: string; hidden?: boolean }) => req<{ ok: boolean }>("PATCH", `/api/people/${id}`, body),
+  mergePerson: (id: number, into: number) => req<{ moved: number }>("POST", `/api/people/${id}/merge`, { into }),
+  recluster: (threshold?: number) => req<{ people: number; assigned: number }>("POST", `/api/faces/cluster?${qs({ threshold })}`),
   browse: (path?: string) =>
     req<{ path: string; parent: string | null; dirs: { name: string; path: string }[]; shortcuts: { name: string; path: string }[] }>(
       "GET",

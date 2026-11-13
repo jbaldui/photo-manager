@@ -169,6 +169,32 @@ CREATE TABLE IF NOT EXISTS pipelines(
   last_result TEXT
 );
 
+-- Face recognition (see faces.py). Embeddings are float32[128] BLOBs, L2-normalised.
+CREATE TABLE IF NOT EXISTS people(
+  id INTEGER PRIMARY KEY,
+  name TEXT,                       -- NULL = not named yet ("Person N")
+  cover_face_id INTEGER,
+  hidden INTEGER DEFAULT 0,
+  created REAL
+);
+CREATE TABLE IF NOT EXISTS faces(
+  id INTEGER PRIMARY KEY,
+  sha256 TEXT NOT NULL,
+  x0 REAL, y0 REAL, x1 REAL, y1 REAL,   -- normalised box in the (EXIF-oriented) image
+  score REAL,
+  emb BLOB NOT NULL,
+  person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  manual INTEGER DEFAULT 0         -- 1 = person chosen by the user; clustering never moves it
+);
+CREATE INDEX IF NOT EXISTS ix_faces_sha ON faces(sha256);
+CREATE INDEX IF NOT EXISTS ix_faces_person ON faces(person_id);
+CREATE TABLE IF NOT EXISTS faces_done(
+  sha256 TEXT PRIMARY KEY,
+  n_faces INTEGER,
+  error TEXT,
+  done_at REAL
+);
+
 -- Enhanced images produced by the Enhance feature (stored under DATA_DIR/generated).
 CREATE TABLE IF NOT EXISTS generated(
   id INTEGER PRIMARY KEY,

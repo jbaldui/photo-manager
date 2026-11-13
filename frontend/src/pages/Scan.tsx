@@ -10,6 +10,7 @@ const STAGE_HELP: Record<string, string> = {
   analyze: "Reads each file once: SHA-256, EXIF/metadata, 4 perceptual hashes (pHash, dHash, wHash, colour) and a thumbnail.",
   embed: "Runs the CLIP neural network on every unique image. Slowest step on CPU; it resumes where it stopped.",
   ocr: "Reads text inside images (OCR). Images most likely to contain text (screenshots, memes, documents) go first; resumes where it stopped.",
+  faces: "Finds faces (YuNet) and recognises them (SFace), then groups them into people. Runs locally; resumes where it stopped.",
   pairs: "Finds candidate pairs with hash and CLIP indices, then confirms edits with ORB keypoint matching.",
   group: "Builds the exact / duplicate / edited / similar groups.",
 };
@@ -20,6 +21,7 @@ export default function Scan() {
   const [err, setErr] = useState<string | null>(null);
   const [withClip, setWithClip] = useState(true);
   const [withOcr, setWithOcr] = useState(true);
+  const [withFaces, setWithFaces] = useState(true);
   const roots = useQuery({ queryKey: ["roots"], queryFn: api.roots, refetchInterval: 5000 });
   const { data: scan } = useScanStatus();
   const errors = useQuery({ queryKey: ["errors"], queryFn: api.errors });
@@ -54,8 +56,8 @@ export default function Scan() {
   });
 
   const running = !!scan?.running;
-  const allStages = ["scan", "analyze", "embed", "ocr", "pairs", "group"];
-  const chosen = allStages.filter((s) => (s !== "embed" || withClip) && (s !== "ocr" || withOcr));
+  const allStages = ["scan", "analyze", "embed", "ocr", "faces", "pairs", "group"];
+  const chosen = allStages.filter((s) => (s !== "embed" || withClip) && (s !== "ocr" || withOcr) && (s !== "faces" || withFaces));
 
   return (
     <div className="page">
@@ -129,6 +131,10 @@ export default function Scan() {
             <label className="row" style={{ fontSize: 13, color: "var(--text-2)" }}>
               <input type="checkbox" checked={withOcr} onChange={(e) => setWithOcr(e.target.checked)} disabled={running} />
               OCR (text search, same-text groups)
+            </label>
+            <label className="row" style={{ fontSize: 13, color: "var(--text-2)" }}>
+              <input type="checkbox" checked={withFaces} onChange={(e) => setWithFaces(e.target.checked)} disabled={running} />
+              Faces (find photos by person)
             </label>
             {running ? (
               <button className="danger" onClick={() => api.cancelScan().then(() => qc.invalidateQueries({ queryKey: ["scan-status"] }))}>

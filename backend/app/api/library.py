@@ -37,6 +37,7 @@ def list_photos(
     text: str | None = None,
     has_text: bool | None = None,
     root_id: int | None = None,
+    person_id: int | None = None,
     sort: str = "date_taken",
     order: str = "desc",
     offset: int = 0,
@@ -83,6 +84,9 @@ def list_photos(
             args.append(fq)
     if has_text is not None:
         where.append(("" if has_text else "NOT ") + "EXISTS (SELECT 1 FROM ocr o WHERE o.sha256=f.sha256 AND o.n_words > 0)")
+    if person_id:
+        where.append("f.sha256 IN (SELECT sha256 FROM faces WHERE person_id=?)")
+        args.append(person_id)
     if root_id:
         where.append("f.root_id=?")
         args.append(root_id)

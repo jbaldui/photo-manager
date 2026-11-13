@@ -2,7 +2,7 @@
 
 Layouts
   flat    every selected photo in one folder
-  groups  one sub-folder per similarity group (+ "_unique" for photos in no group)
+  groups  one sub-folder per similarity group inside "Groups/"; photos in no group go to "_unique"
 
 Naming
   keep        original names; a clash inside a folder gets "_2", "_3", ... (case-insensitive)
@@ -159,7 +159,7 @@ def build_plan(o: Options) -> dict:
         if gi is None:
             return "_unique"
         rep = files[groups[gi - 1][0]]
-        return f"g{gi:04d}_{_clean(Path(rep['name']).stem, 40)}_({len([x for x in groups[gi - 1] if x in chosen_set])})"
+        return f"Groups/g{gi:04d}_{_clean(Path(rep['name']).stem, 40)}_({len([x for x in groups[gi - 1] if x in chosen_set])})"
 
     def ordered(fid):
         gi = group_of.get(fid)

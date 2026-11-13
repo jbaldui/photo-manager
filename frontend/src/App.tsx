@@ -15,6 +15,7 @@ import Organize from "./pages/Organize";
 import AutoProcess from "./pages/AutoProcess";
 import Quarantine from "./pages/Quarantine";
 import Enhanced from "./pages/Enhanced";
+import People from "./pages/People";
 
 export const useScanStatus = () => useJobWatcher("scan-status", api.scanStatus);
 
@@ -58,6 +59,7 @@ export default function App() {
           <NavLink to="/groups">
             Duplicates <span className="count">{stats ? num(dupCount) : ""}</span>
           </NavLink>
+          <NavLink to="/people">People</NavLink>
           <NavLink to="/search">Search</NavLink>
           <NavLink to="/organize">Organize</NavLink>
           <NavLink to="/auto">Auto Process</NavLink>
@@ -97,6 +99,7 @@ export default function App() {
           <Route path="/groups" element={<Groups />} />
           <Route path="/groups/:id" element={<GroupDetail />} />
           <Route path="/photo/:id" element={<PhotoPage />} />
+          <Route path="/people" element={<People />} />
           <Route path="/search" element={<Search />} />
           <Route path="/scan" element={<Scan />} />
           <Route path="/settings" element={<Settings />} />
