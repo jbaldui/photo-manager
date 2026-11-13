@@ -1,63 +1,11 @@
-import { ReactNode, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { api, OrganizeOptions, OrganizePreview, Tier } from "../api";
-import FolderPicker from "../components/FolderPicker";
-import { bytes, duration, num, TIER_INFO } from "../format";
-
-const TIERS: Tier[] = ["exact", "duplicate", "near", "similar", "text"];
-
-function Choice<T extends string>({
-  value,
-  onChange,
-  options,
-  name,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { v: T; label: string; help: string }[];
-  name: string;
-}) {
-  return (
-    <div className="choices" role="radiogroup">
-      {options.map((o) => (
-        <label key={o.v} className={`choice ${value === o.v ? "on" : ""}`}>
-          <input type="radio" name={name} checked={value === o.v} onChange={() => onChange(o.v)} />
-          <span>
-            <strong>{o.label}</strong>
-            <span className="sub" style={{ display: "block", fontSize: 12 }}>{o.help}</span>
-          </span>
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function Section({ n, title, children }: { n: number; title: string; children: ReactNode }) {
-  return (
-    <div className="card">
-      <h2><span className="step">{n}</span>{title}</h2>
-      {children}
-    </div>
-  );
-}
-
-const EXAMPLE_NAMES: Record<OrganizeOptions["pattern"], string> = {
-  date: "2019-08-12_15-30-12.jpg",
-  date_name: "2019-08-12_15-30-12_IMG_1234.jpg",
-  group: "g0003_01_IMG_1234.jpg  (01 = best copy)",
-};
+import { api, OrganizeOptions, OrganizePreview } from "../api";
+import { Choice, DEFAULT_ORGANIZE, OrganizeFields } from "../components/OrganizeForm";
+import { bytes, duration, num } from "../format";
 
 export default function Organize() {
-  const [picking, setPicking] = useState(false);
-  const [o, setO] = useState<OrganizeOptions>({
-    dest: "",
-    scope: "not_discarded",
-    layout: "groups",
-    tiers: ["exact", "duplicate", "near"],
-    one_per_exact: false,
-    rename: "duplicates",
-    pattern: "date_name",
-  });
+  const [o, setO] = useState<OrganizeOptions>(DEFAULT_ORGANIZE);
   const [preview, setPreview] = useState<OrganizePreview | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const set = <K extends keyof OrganizeOptions>(k: K, v: OrganizeOptions[K]) => {
@@ -78,7 +26,6 @@ export default function Organize() {
   });
   const st = status.data;
   const running = !!st?.running;
-  const needsTiers = o.layout === "groups" || o.scope === "grouped" || o.rename === "duplicates" || o.pattern === "group";
   const enough = preview ? preview.bytes < preview.free_bytes * 0.98 : true;
 
   return (
@@ -131,90 +78,28 @@ export default function Organize() {
       )}
 
       <div className="stack">
-        <Section n={1} title="Destination">
-          <div className="row">
-            <input className="grow mono" readOnly value={o.dest} placeholder="Choose where the organized copy will be created…" onClick={() => setPicking(true)} />
-            <button onClick={() => setPicking(true)}>Choose folder</button>
-          </div>
-          <p className="sub" style={{ fontSize: 12, marginTop: 6 }}>
-            A new folder named “Organized &lt;date time&gt;” is created inside it, so nothing there is ever overwritten. It must be outside your scanned folders.
-          </p>
-        </Section>
-
-        <Section n={2} title="Which photos">
-          <Choice
-            name="scope"
-            value={o.scope}
-            onChange={(v) => set("scope", v)}
-            options={[
-              { v: "not_discarded", label: "Everything except “discard”", help: "All photos, skipping the ones you marked discard." },
-              { v: "all", label: "All photos", help: "The whole library, ignoring your decisions." },
-              { v: "grouped", label: "Only photos in groups", help: "Only photos that have a duplicate / similar / same-text match." },
-            ]}
-          />
-          <label className="row" style={{ marginTop: 10, fontSize: 13 }}>
-            <input type="checkbox" checked={o.one_per_exact} onChange={(e) => set("one_per_exact", e.target.checked)} />
-            Copy only one of byte-identical files (the best copy)
-          </label>
-        </Section>
-
-        <Section n={3} title="Folder layout">
-          <Choice
-            name="layout"
-            value={o.layout}
-            onChange={(v) => set("layout", v)}
-            options={[
-              { v: "groups", label: "One sub-folder per group", help: "g0001_<name>_(5)/ … for each group; photos with no match go to _unique/." },
-              { v: "flat", label: "A single folder", help: "Every photo side by side in one folder." },
-            ]}
-          />
-          {needsTiers && (
-            <div style={{ marginTop: 12 }}>
-              <h3>Groups are made of</h3>
-              <div className="row">
-                {TIERS.map((t) => (
-                  <label key={t} className={`badge ${o.tiers.includes(t) ? "accent" : ""}`} style={{ cursor: "pointer", padding: "5px 10px", fontSize: 12 }}>
-                    <input
-                      type="checkbox"
-                      style={{ margin: "0 4px 0 0" }}
-                      checked={o.tiers.includes(t)}
-                      onChange={(e) => set("tiers", e.target.checked ? [...o.tiers, t] : o.tiers.filter((x) => x !== t))}
-                    />
-                    {TIER_INFO[t].label}
-                  </label>
-                ))}
-              </div>
-              <p className="sub" style={{ fontSize: 12, marginTop: 6 }}>Overlapping groups are merged, so each photo is copied once.</p>
-            </div>
-          )}
-        </Section>
-
-        <Section n={4} title="File names">
-          <Choice
-            name="rename"
-            value={o.rename}
-            onChange={(v) => set("rename", v)}
-            options={[
-              { v: "keep", label: "Keep original names", help: "Only clashes are renamed: photo.jpg, photo_2.jpg, photo_3.jpg…" },
-              { v: "duplicates", label: "Rename photos in groups", help: "Duplicates get a clear, unique name; other photos keep theirs." },
-              { v: "all", label: "Rename all photos", help: "Every photo gets a name from the pattern below." },
-            ]}
-          />
-          {o.rename !== "keep" && (
-            <div className="row" style={{ marginTop: 10 }}>
-              <span style={{ fontSize: 13 }}>Pattern</span>
-              <select value={o.pattern} onChange={(e) => set("pattern", e.target.value as OrganizeOptions["pattern"])}>
-                <option value="date_name">Date + original name</option>
-                <option value="date">Date only</option>
-                <option value="group">Group number + original name</option>
-              </select>
-              <span className="mono sub" style={{ fontSize: 12 }}>{EXAMPLE_NAMES[o.pattern]}</span>
-            </div>
-          )}
-          <p className="sub" style={{ fontSize: 12, marginTop: 8 }}>
-            Date = date taken (EXIF or file name), otherwise the last-modified date. Names never collide (checked case-insensitively, safe for Windows/USB drives).
-          </p>
-        </Section>
+        <OrganizeFields
+          o={o}
+          set={set}
+          scope={
+            <>
+              <Choice
+                name="scope"
+                value={o.scope}
+                onChange={(v) => set("scope", v)}
+                options={[
+                  { v: "not_discarded", label: "Everything except “discard”", help: "All photos, skipping the ones you marked discard." },
+                  { v: "all", label: "All photos", help: "The whole library, ignoring your decisions." },
+                  { v: "grouped", label: "Only photos in groups", help: "Only photos that have a duplicate / similar / same-text match." },
+                ]}
+              />
+              <label className="row" style={{ marginTop: 10, fontSize: 13 }}>
+                <input type="checkbox" checked={o.one_per_exact} onChange={(e) => set("one_per_exact", e.target.checked)} />
+                Copy only one of byte-identical files (the best copy)
+              </label>
+            </>
+          }
+        />
 
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button disabled={!o.dest || pv.isPending || running} onClick={() => pv.mutate(o)}>
@@ -264,17 +149,6 @@ export default function Organize() {
           </div>
         )}
       </div>
-      {picking && (
-        <FolderPicker
-          title="Choose the destination"
-          note="A new sub-folder will be created here."
-          onClose={() => setPicking(false)}
-          onPick={(p) => {
-            set("dest", p);
-            setPicking(false);
-          }}
-        />
-      )}
     </div>
   );
 }

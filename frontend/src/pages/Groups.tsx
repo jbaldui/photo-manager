@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, Tier } from "../api";
+import RemoveModal from "../components/RemoveModal";
 import { Thumb } from "../components/ui";
 import { bytes, num, TIER_INFO } from "../format";
 
@@ -20,6 +22,8 @@ export default function Groups() {
     setSp(n, { replace: true });
   };
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats });
+  const [moving, setMoving] = useState(false);
+  const discards = stats?.decisions.find((d) => d.key === "discard")?.count ?? 0;
 
   const q = useInfiniteQuery({
     queryKey: ["groups", tier, sort, undecided],
@@ -37,7 +41,8 @@ export default function Groups() {
     mutationFn: () => api.autoDecideTier(tier),
     onSuccess: (r) => {
       qc.invalidateQueries();
-      alert(`Auto-decided ${r.groups_decided} groups. Nothing was deleted — export a script from Settings when ready.`);
+      if (r.groups_decided && confirm(`Decided ${r.groups_decided} groups. Nothing has been moved yet.\n\nReview the discarded photos and move them to quarantine now?`))
+        setMoving(true);
     },
   });
 
@@ -79,12 +84,23 @@ export default function Groups() {
             Auto-decide all
           </button>
         )}
+        {discards > 0 && (
+          <button className="primary" onClick={() => setMoving(true)} title="Move every photo marked discard out of your library (undoable)">
+            Move {num(discards)} discarded to quarantine…
+          </button>
+        )}
       </div>
 
       {!q.isLoading && !groups.length && (
         <div className="card empty">
           <h2>No {TIER_INFO[tier].label.toLowerCase()} found</h2>
-          <p>{stats?.total_files ? "Nothing in this tier — or the grouping stage hasn't run yet." : "Run a scan first."}</p>
+          <p>
+            {stats?.removed && !stats?.tiers[tier]
+              ? `No ${TIER_INFO[tier].label.toLowerCase()} left: ${num(stats.removed)} photo(s) are in quarantine.`
+              : stats?.total_files
+                ? "Nothing in this tier — or the grouping stage hasn't run yet."
+                : "Run a scan first."}
+          </p>
         </div>
       )}
 
@@ -111,6 +127,7 @@ export default function Groups() {
           </div>
         ))}
       </div>
+      {moving && <RemoveModal onClose={() => setMoving(false)} />}
       {q.hasNextPage && (
         <div style={{ textAlign: "center", marginTop: 16 }}>
           <button onClick={() => q.fetchNextPage()} disabled={q.isFetchingNextPage}>

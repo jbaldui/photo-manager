@@ -112,6 +112,8 @@ export interface Stats {
   errors: number;
   pending: number;
   missing: number;
+  removed: number;
+  removed_bytes: number;
   embedded: number;
   images: number;
   ocr_done: number;
@@ -181,6 +183,141 @@ export interface OrganizeStatus {
   cancelled?: boolean;
 }
 
+export interface RemovalOptions {
+  dest?: string | null;
+  scope?: "discarded" | "files";
+  file_ids?: number[];
+  group_id?: number | null;
+}
+
+export interface RemovalPreview {
+  files: number;
+  bytes: number;
+  blocked: { file_id: number; rel_path: string; reason: string }[];
+  dest: string;
+  dest_exists: boolean;
+  same_device: boolean;
+  free_bytes: number;
+  sample: { file_id: number; src: string; qrel: string; size: number }[];
+}
+
+export interface JobStatus {
+  running: boolean;
+  mode?: "move" | "restore";
+  batch_id?: number;
+  phase?: string;
+  total?: number;
+  done?: number;
+  moved?: number;
+  skipped?: number;
+  conflicts?: number;
+  bytes_total?: number;
+  bytes_done?: number;
+  errors?: { src: string; error: string }[];
+  started?: number;
+  finished?: number | null;
+  cancelled?: boolean;
+  dest?: string;
+}
+
+export interface RemovalBatch {
+  id: number;
+  created: number;
+  dest: string;
+  reason: string;
+  files: number;
+  bytes: number;
+  state: string;
+  restored_at: number | null;
+  counts: Record<string, number>;
+  in_quarantine: number;
+  items?: { id: number; file_id: number; root_path: string; rel_path: string; quarantine_path: string; size: number; status: string; error: string | null }[];
+}
+
+export interface PipelineConfig {
+  scan: { mode: "refresh" | "full" };
+  decide: { enabled: boolean; tiers: Tier[] };
+  organize: { enabled: boolean; options: Partial<OrganizeOptions> };
+  quarantine: { enabled: boolean; dest: string | null; include_manual_discards: boolean };
+}
+
+export interface AutoStep {
+  key: "scan" | "decide" | "organize" | "quarantine";
+  label: string;
+  status: "queued" | "running" | "done" | "skipped" | "cancelled" | "error" | "not run";
+  message: string;
+  result: Record<string, number | string> | null;
+}
+
+export interface AutoStatus {
+  running: boolean;
+  pipeline_id?: number;
+  name?: string;
+  dry_run?: boolean;
+  error?: string | null;
+  started?: number;
+  finished?: number | null;
+  cancelled?: boolean;
+  steps?: AutoStep[];
+}
+
+export interface Pipeline {
+  id: number;
+  name: string;
+  builtin: number;
+  config: PipelineConfig;
+  last_run: number | null;
+  last_result: AutoStatus | null;
+}
+
+export interface EnhanceOptions {
+  group_id?: number | null;
+  file_ids?: number[];
+  fuse: boolean;
+  model: "fast" | "quality" | "none";
+  scale: 1 | 2 | 4;
+  format?: "auto" | "jpg" | "png";
+}
+
+export interface EnhanceEstimate {
+  sources: number;
+  fuse: boolean;
+  tier: Tier | null;
+  reference: { id: number; rel_path: string; width: number; height: number };
+  output: { width: number; height: number };
+  super_resolution: boolean;
+  model_downloaded: boolean;
+  seconds: number;
+  notes: string[];
+}
+
+export interface Generated {
+  id: number;
+  group_id: number | null;
+  source_file_ids: number[];
+  path: string;
+  name: string;
+  created: number;
+  width: number;
+  height: number;
+  bytes: number | null;
+  image_url: string;
+  params: EnhanceOptions & { sources: { id: number; rel_path: string; role: string; ecc?: number; coverage?: number }[]; fused: boolean; tier: Tier | null };
+}
+
+export interface EnhanceStatus {
+  running: boolean;
+  phase?: string;
+  progress?: number;
+  message?: string;
+  error?: string | null;
+  result?: Generated | null;
+  started?: number;
+  finished?: number | null;
+  estimate?: EnhanceEstimate;
+  cancelled?: boolean;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -214,7 +351,27 @@ const qs = (p: Record<string, unknown>) => {
   return s.toString();
 };
 
+export interface Person {
+  id: number;
+  name: string | null;
+  faces: number;
+  photos: number;
+  cover_face_id: number | null;
+  hidden: boolean;
+}
+export interface PeopleResponse {
+  people: Person[];
+  unassigned: number;
+  faces: number;
+  scanned: number;
+  threshold: number;
+}
+
 export const api = {
+  people: (includeHidden = false) => req<PeopleResponse>("GET", `/api/people?${qs({ include_hidden: includeHidden })}`),
+  patchPerson: (id: number, body: { name?: string; hidden?: boolean }) => req<{ ok: boolean }>("PATCH", `/api/people/${id}`, body),
+  mergePerson: (id: number, into: number) => req<{ moved: number }>("POST", `/api/people/${id}/merge`, { into }),
+  recluster: (threshold?: number) => req<{ people: number; assigned: number }>("POST", `/api/faces/cluster?${qs({ threshold })}`),
   browse: (path?: string) =>
     req<{ path: string; parent: string | null; dirs: { name: string; path: string }[]; shortcuts: { name: string; path: string }[] }>(
       "GET",
@@ -222,7 +379,11 @@ export const api = {
     ),
   roots: () => req<Root[]>("GET", "/api/roots"),
   addRoot: (path: string) => req<{ id: number }>("POST", "/api/roots", { path }),
-  removeRoot: (id: number) => req("DELETE", `/api/roots/${id}`),
+  removeRoot: (id: number) =>
+    req<{ ok: boolean; removed: { files: number; images: number; thumbnails: number; groups: Record<string, number> } }>(
+      "DELETE",
+      `/api/roots/${id}`,
+    ),
   startScan: (stages?: string[]) => req<ScanStatus>("POST", "/api/scan", { stages }),
   cancelScan: () => req<ScanStatus>("POST", "/api/scan/cancel"),
   scanStatus: () => req<ScanStatus>("GET", "/api/scan/status"),
@@ -237,12 +398,34 @@ export const api = {
   autoDecide: (groupId: number) => req("POST", `/api/groups/${groupId}/auto-decide`),
   autoDecideTier: (tier: Tier) => req<{ groups_decided: number }>("POST", "/api/groups/auto-decide-tier", { tier }),
   settings: () =>
-    req<{ values: Record<string, number>; defaults: Record<string, number>; data_dir: string; workers: number }>("GET", "/api/settings"),
+    req<{ values: Record<string, number>; defaults: Record<string, number>; presets: Record<string, Record<string, number>>; data_dir: string; workers: number }>("GET", "/api/settings"),
   putSettings: (values: Record<string, number>) => req("PUT", "/api/settings", values),
-  exportData: (kind: "csv" | "json" | "script") => req<{ path: string; name: string; url: string }>("POST", "/api/export", { kind }),
+  exportData: (kind: "csv" | "json") => req<{ path: string; name: string; url: string }>("POST", "/api/export", { kind }),
   organizePreview: (o: OrganizeOptions) => req<OrganizePreview>("POST", "/api/organize/preview", o),
   organizeStart: (o: OrganizeOptions) => req<OrganizeStatus>("POST", "/api/organize/start", o),
   organizeStatus: () => req<OrganizeStatus>("GET", "/api/organize/status"),
   organizeCancel: () => req<OrganizeStatus>("POST", "/api/organize/cancel"),
+  removalDefaults: () => req<{ dest: string }>("GET", "/api/removals/defaults"),
+  removalPreview: (o: RemovalOptions) => req<RemovalPreview>("POST", "/api/removals/preview", o),
+  removalStart: (o: RemovalOptions) => req<JobStatus>("POST", "/api/removals/start", o),
+  removalStatus: () => req<JobStatus>("GET", "/api/removals/status"),
+  removalCancel: () => req<JobStatus>("POST", "/api/removals/cancel"),
+  removalBatches: () => req<RemovalBatch[]>("GET", "/api/removals"),
+  removalBatch: (id: number) => req<RemovalBatch>("GET", `/api/removals/${id}`),
+  restoreBatch: (id: number) => req<JobStatus>("POST", `/api/removals/${id}/restore`),
+  pipelines: () => req<Pipeline[]>("GET", "/api/pipelines"),
+  createPipeline: (name: string, config: PipelineConfig) => req<Pipeline>("POST", "/api/pipelines", { name, config }),
+  updatePipeline: (id: number, name: string, config: PipelineConfig) => req<Pipeline>("PUT", `/api/pipelines/${id}`, { name, config }),
+  deletePipeline: (id: number) => req("DELETE", `/api/pipelines/${id}`),
+  runPipeline: (id: number, dry_run: boolean) => req<AutoStatus>("POST", `/api/pipelines/${id}/run`, { dry_run }),
+  autoStatus: () => req<AutoStatus>("GET", "/api/auto/status"),
+  autoCancel: () => req<AutoStatus>("POST", "/api/auto/cancel"),
+  enhanceEstimate: (o: EnhanceOptions) => req<EnhanceEstimate>("POST", "/api/enhance/estimate", o),
+  enhanceStart: (o: EnhanceOptions) => req<EnhanceStatus>("POST", "/api/enhance", o),
+  enhanceStatus: () => req<EnhanceStatus>("GET", "/api/enhance/status"),
+  enhanceCancel: () => req<EnhanceStatus>("POST", "/api/enhance/cancel"),
+  generated: (group_id?: number) => req<Generated[]>("GET", `/api/generated?${qs({ group_id })}`),
+  deleteGenerated: (id: number) => req("DELETE", `/api/generated/${id}`),
+  saveGenerated: (id: number, dest: string) => req<{ path: string }>("POST", `/api/generated/${id}/save`, { dest }),
   errors: () => req<{ id: number; root: string; rel_path: string; size: number; error: string }[]>("GET", "/api/errors"),
 };

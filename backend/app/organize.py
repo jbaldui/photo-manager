@@ -2,7 +2,7 @@
 
 Layouts
   flat    every selected photo in one folder
-  groups  one sub-folder per similarity group (+ "_unique" for photos in no group)
+  groups  one sub-folder per similarity group inside "Groups/"; photos in no group go to "_unique"
 
 Naming
   keep        original names; a clash inside a folder gets "_2", "_3", ... (case-insensitive)
@@ -66,18 +66,9 @@ def _stamp(f) -> str:
 
 
 def validate_dest(dest: str) -> Path:
-    p = Path(dest).expanduser().resolve()
-    if not p.is_dir():
-        raise ValueError("Destination folder does not exist")
-    if p == config.DATA_DIR or config.DATA_DIR in p.parents:
-        raise ValueError("Destination is inside the app's data folder")
-    for r in db.get().execute("SELECT path FROM roots"):
-        root = Path(r["path"])
-        if p == root or root in p.parents:
-            raise ValueError(f"Destination is inside a scanned folder ({root}); the copies would be picked up as duplicates on the next scan")
-    if not os.access(p, os.W_OK):
-        raise ValueError("Destination folder is not writable")
-    return p
+    from .paths import check_outside_library
+
+    return check_outside_library(dest)
 
 
 def build_plan(o: Options) -> dict:
@@ -168,7 +159,7 @@ def build_plan(o: Options) -> dict:
         if gi is None:
             return "_unique"
         rep = files[groups[gi - 1][0]]
-        return f"g{gi:04d}_{_clean(Path(rep['name']).stem, 40)}_({len([x for x in groups[gi - 1] if x in chosen_set])})"
+        return f"Groups/g{gi:04d}_{_clean(Path(rep['name']).stem, 40)}_({len([x for x in groups[gi - 1] if x in chosen_set])})"
 
     def ordered(fid):
         gi = group_of.get(fid)
@@ -229,8 +220,11 @@ class Job:
         with self.lock:
             return dict(self.state)
 
-    def start(self, o: Options) -> dict:
-        if self.thread and self.thread.is_alive():
+    def running(self) -> bool:
+        return bool(self.thread and self.thread.is_alive()) or bool(self.state.get("running"))
+
+    def _prepare(self, o: Options) -> tuple[Path, list[dict]]:
+        if self.running():
             raise RuntimeError("An organize job is already running")
         dest = validate_dest(o.dest)
         plan = build_plan(o)
@@ -240,12 +234,29 @@ class Job:
         if plan["bytes"] > free * 0.98:
             raise ValueError(f"Not enough free space: need {plan['bytes'] / 1e9:.1f} GB, {free / 1e9:.1f} GB free")
         out = dest / f"Organized {time.strftime('%Y-%m-%d %H%M%S')}"
+        n = 2
+        while out.exists():
+            out = dest / f"Organized {time.strftime('%Y-%m-%d %H%M%S')} ({n})"
+            n += 1
         out.mkdir()
         self.cancel.clear()
         self.state = {"running": True, "out": str(out), "total": plan["files"], "done": 0, "bytes_total": plan["bytes"],
                       "bytes_done": 0, "errors": [], "started": time.time(), "finished": None, "cancelled": False}
-        self.thread = threading.Thread(target=self._run, args=(out, plan["items"]), daemon=True, name="organize")
+        return out, plan["items"]
+
+    def start(self, o: Options) -> dict:
+        from .locks import ensure_idle
+
+        ensure_idle("organize")
+        out, items = self._prepare(o)
+        self.thread = threading.Thread(target=self._run, args=(out, items), daemon=True, name="organize")
         self.thread.start()
+        return self.status()
+
+    def run_sync(self, o: Options) -> dict:
+        """Run in the calling thread (used by Auto Process). Returns the final status."""
+        out, items = self._prepare(o)
+        self._run(out, items)
         return self.status()
 
     def _run(self, out: Path, items: list[dict]) -> None:

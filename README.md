@@ -1,13 +1,13 @@
 # Photo Manager
 
-A self-hosted application for exploring large, messy photo collections. It also finds exact duplicates, near-duplicates and images that carry the same text.
+A self-hosted application for exploring large, messy photo collections. It finds exact duplicates, near-duplicates and images that carry the same text, and helps you clean them up safely.
 
 Photo Manager scans a folder of photos (hundreds of thousands of files, from any mix of phones, cameras, messaging apps and downloads) and shows each photo's metadata in a web interface. It then groups photos that are copies or edits of the same image, even when file names, formats, dates and metadata differ. It also reads the text inside images, so you can search photos by the words written in them.
 
-Everything runs on your own machine. Your photos are never uploaded, modified, moved or deleted.
+Everything runs on your own machine. Your photos are never uploaded, modified or deleted; they are only *moved* when you explicitly send duplicates to quarantine, and every move can be undone.
 
 > [!WARNING]
-> **Work in progress.** Photo Manager is under active development and has not yet been validated on large real-world libraries. Expect rough edges, changing defaults and breaking changes to the local database format between versions. It never alters your original files, but review its suggestions before acting on them, and keep a backup of your photos.
+> **Work in progress.** Photo Manager is under active development and has not yet been validated on large real-world libraries. Expect rough edges, changing defaults and breaking changes to the local database format between versions. It never modifies or deletes your original files and every quarantine move can be undone, but review its suggestions before acting on them, and keep a backup of your photos.
 
 ---
 
@@ -34,7 +34,10 @@ Everything runs on your own machine. Your photos are never uploaded, modified, m
 - **Visual search:** describe a picture in plain language ("dog on a beach") and find matching photos.
 - **Review workflow:** compare group members side by side with their differences highlighted, mark *keep* / *discard*, and auto-select the best copy.
 - **Organize:** create an organized copy of your library, either flat or with one folder per group, with collision-free renaming.
-- **Exports:** CSV / JSON reports and a reviewable shell script that moves discarded files to a quarantine folder.
+- **Quarantine with undo:** move discarded photos out of your library from inside the app. Nothing is deleted, the last copy of a picture is always kept, and each batch can be restored with one click. Groups and counts update immediately.
+- **Auto Process:** saved pipelines that refresh the library, keep the best copy of every exact/duplicate group, write an organized copy and quarantine the rest in one run, with a dry-run preview.
+- **Enhance:** merge the copies of a picture into one improved image (alignment + robust multi-image fusion), optionally upscaled by a neural network (Real-ESRGAN), shown with a before/after slider.
+- **Exports:** CSV / JSON reports of every group and decision.
 - **Broad format support:** JPEG, PNG, GIF, WebP, BMP, TIFF, HEIC/HEIF, AVIF and camera RAW (CR2, CR3, NEF, ARW, DNG, ORF, RW2, RAF…). Files with wrong or missing extensions are identified by their content.
 
 ---
@@ -78,16 +81,23 @@ The scores from each method are combined into five tiers, from strictest to loos
 
 Duplicates are merged transitively (union-find). The looser tiers use star clustering, so every member must be directly similar to the group's centre, and chains of loosely related photos are not merged. The best copy in each group is chosen by resolution, presence of a real capture date and metadata, then age.
 
-All thresholds can be adjusted in **Settings**, and grouping can be re-run without re-analysing any photos.
+All thresholds can be adjusted in **Settings**, either with a single **similarity level** slider (1 = only near-identical images, 5 = default, 10 = very permissive) or one by one, and grouping can be re-run without re-analysing any photos.
 
 ---
 
 ## Privacy and safety
 
-- **Your originals are read-only.** The application never writes to, renames, moves or deletes files in the folders it scans. An automated test checks that the source folder is byte-for-byte identical after a full run.
+- **Your originals are never modified or deleted.** Scanning, analysis, Organize and Enhance only read the folders you scan; an automated test checks that the source folder is byte-for-byte identical after a full run.
+- **Moves happen only when you ask, and can be undone.** The only operation that touches your folders is **Move to quarantine** (manually, or as the last step of an Auto Process run):
+  - files are *moved* into a quarantine folder you choose, keeping their folder structure; nothing is ever deleted or overwritten
+  - every move is logged in the database *before* it happens, and a `manifest.csv` is written for each batch
+  - the last remaining copy of a group is never moved, and a file that changed since the last scan is skipped
+  - **Restore** puts a batch back exactly where it was (same name, same dates); if something now occupies the original path, that file stays in quarantine instead of overwriting it
+  - deleting the quarantine folder for good is left to you
 - **Local only.** The database, thumbnails, embeddings, OCR text and exports are stored in `./data/`, which is excluded from version control. The server listens on `127.0.0.1` only.
-- **One-time model downloads.** On first use, the CLIP model (~600 MB, from Hugging Face) and the OCR models (~15 MB, from ModelScope) are downloaded into `data/models/`. No photos or metadata are ever sent anywhere.
-- **Destructive actions stay with you.** Discarding a photo only records a decision. You can export a script that *moves* (never deletes) the discarded files, and the app never runs it itself. The **Organize** feature only writes copies, to a new folder outside your scanned folders.
+- **One-time model downloads.** On first use, the CLIP model (~600 MB, from Hugging Face) and the OCR models (~15 MB, from ModelScope) are downloaded into `data/models/`. The Enhance upscaling models (5 MB / 64 MB) are downloaded from the official Real-ESRGAN GitHub releases the first time you use them, and verified by SHA-256. No photos or metadata are ever sent anywhere.
+- **Decisions are just decisions.** Marking a photo *discard* moves nothing until you confirm **Move to quarantine**. **Organize** and **Enhance** only write new files, outside your scanned folders.
+- **Automation is limited to safe cases.** Auto Process only decides *exact* and *duplicate* groups, never overrides a decision you made, and offers a dry run that changes nothing.
 
 > `./data/` holds private information about your collection: file paths, GPS coordinates and text read from your photos. Do not commit or share it.
 
@@ -138,14 +148,25 @@ For development with hot reload:
 
 ## Usage
 
-1. **Add a folder.** Open **Folders & scan**, click **Add folder** and browse to your photo collection. All sub-folders are included at any depth; hidden folders (starting with `.`) are skipped.
+1. **Add a folder.** Open **Folders & scan**, click **Add folder** and browse to your photo collection. All sub-folders are included at any depth; hidden folders (starting with `.`) are skipped. You can add several folders.
+   - **Removing a folder** deletes everything the app derived from it: its photos, their duplicate-group memberships and keep/discard marks. It also removes thumbnails, OCR text and match data for any content that existed only in that folder. Groups are rebuilt, so photos in other folders are no longer listed as duplicates of the removed ones. The files on disk are not touched.
 2. **Scan.** Click **Scan now**. CLIP and OCR can be switched off for a quick first pass that finds exact copies and duplicates only. A stopped scan resumes where it left off, and later scans only process new or changed files.
 3. **Explore.** Use **Overview** for the big picture, **Library** to filter and sort, and the photo page for full metadata, fingerprints, recognised text and similar photos.
 4. **Review duplicates.** Under **Duplicates**, open a group to compare its members side by side. Mark photos *keep* or *discard*, or use **Keep best, discard rest**.
 5. **Search.** Look for words inside images (*Text in image*: accents ignored, `"quoted phrases"` for exact matches) or describe what a photo shows (*Visual content*).
 6. **Act on the results.**
    - **Organize:** create a copy that is flat or has one folder per group, keeping original names or renaming photos by date or group number. A preview shows every destination path before anything is copied, and each run writes a `manifest.csv`.
-   - **Settings → Export:** produce a CSV/JSON report, or a script that moves discarded files to a quarantine folder for you to review and run.
+   - **Move to quarantine:** from **Duplicates**, a group page or **Quarantine**, move every photo marked *discard*. The preview shows how many files move, how much space is freed and which photos are kept because they are the last copy. Counts and groups update as soon as the move ends. **Quarantine** lists every batch with a **Restore** button.
+   - **Enhance:** on a group page (or a photo page) press **✨ Enhance**. The copies are aligned onto the best one and merged, which removes noise and compression artefacts they don't share; the result can then be upscaled ×1/×2/×4 by Real-ESRGAN (*Fast* or *Best quality*). The time estimate is shown first: on a 4-core CPU the fast model needs roughly 45 s per megapixel. Results are listed under **Enhanced**. Neural upscaling invents plausible detail: the result is for viewing and sharing, not a recovered original.
+   - **Settings → Export:** produce a CSV/JSON report of every group and decision.
+7. **Automate.** **Auto Process** runs a saved pipeline in one go:
+   1. *Refresh*: a quick check for moved/deleted files, or a full analysis of new photos.
+   2. *Decide*: keep the best copy in every undecided exact/duplicate group.
+   3. *Organize*: write an organized copy of everything not discarded. This happens before anything moves, so a full disk stops the run early.
+   4. *Quarantine*: move the copies this run discarded.
+
+   Three presets are included (*Remove exact duplicates*, *Clean & organize*, *Organize only*); edit them or save your own. **Dry run** shows what each step would do without changing anything.
+8. **Files changed outside the app?** If you moved or deleted photos in your file manager, click **Check for moved/deleted files** on **Folders & scan**. It only checks file system entries, so it takes seconds, and the groups are updated.
 
 ---
 
@@ -202,6 +223,11 @@ backend/
     verify.py       ORB geometric verification
     grouping.py     similarity tiers
     organize.py     organized copy: planning, naming, copying, manifest
+    quarantine.py   move discarded photos to quarantine, restore, last-copy protection
+    autoprocess.py  Auto Process pipelines (refresh → decide → organize → quarantine)
+    enhance.py      Enhance: alignment, robust multi-image fusion, output
+    sr_models.py    Real-ESRGAN networks (CPU) and verified weight download
+    maintenance.py  folder removal and start-up self-repair
     jobs.py         background pipeline with progress and ETA
     api/            HTTP API (FastAPI routers)
   tests/            pytest suite and fixture generator
@@ -232,13 +258,16 @@ The tests run the full pipeline through the HTTP API. They check:
 - metadata extraction
 - incremental rescans
 - the Organize output
-- that the source files are left untouched
+- that the source files are left untouched by every read-only feature
+- quarantine and restore: identical content and dates, last-copy protection, no overwrite on conflicts, cross-drive moves
+- Auto Process: dry runs change nothing; real runs leave edited/similar groups alone and can be undone
+- Enhance: fusing degraded copies beats every single copy; unrelated images are rejected
 
 ---
 
 ## Project status and roadmap
 
-**Status: work in progress.** The core pipeline, review UI, search and Organize feature are functional and covered by automated tests on synthetic data. They have not yet been benchmarked or tuned on a large real-world library.
+**Status: work in progress.** The core pipeline, review UI, search, Organize, quarantine, Auto Process and Enhance are functional and covered by automated tests on synthetic data. They have not yet been benchmarked or tuned on a large real-world library.
 
 ### Known limitations
 
@@ -246,7 +275,8 @@ The tests run the full pipeline through the HTTP API. They check:
 - OCR reads Latin-script languages only. Stylised, very small or handwritten text may be missed.
 - "Same text" compares the set of words, not their order.
 - XMP and IPTC metadata are not read yet. Videos and Live Photo components are skipped.
-- The first CLIP and OCR passes are slow on CPU-only machines.
+- The first CLIP and OCR passes are slow on CPU-only machines. So is neural upscaling, especially the *Best quality* model, which is limited to 1 MP of input (4 MP for *Fast*).
+- Enhance can only remove defects the copies don't share: merging several copies of the same low-quality meme won't recover detail none of them has.
 - The local database format may change between versions without a migration path.
 - Windows is untested.
 

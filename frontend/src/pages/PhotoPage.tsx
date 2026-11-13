@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
+import EnhanceModal from "../components/EnhanceModal";
 import { Lightbox, ScoreBadges, Thumb } from "../components/ui";
 import { bytes, DATE_SOURCE_LABEL, dateTime, epoch, TIER_INFO } from "../format";
 
@@ -12,6 +13,7 @@ export default function PhotoPage() {
   const qc = useQueryClient();
   const [zoom, setZoom] = useState(false);
   const [showBoxes, setShowBoxes] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
   const { data: p, isLoading, error } = useQuery({ queryKey: ["photo", pid], queryFn: () => api.photo(pid) });
   const sim = useQuery({ queryKey: ["similar", pid], queryFn: () => api.similar(pid), enabled: !!p?.hashes?.clip_embedded });
   const decide = useMutation({
@@ -49,10 +51,17 @@ export default function PhotoPage() {
         <div className="row">
           <button className={p.decision === "keep" ? "on-keep" : ""} onClick={() => decide.mutate(p.decision === "keep" ? "clear" : "keep")}>✓ Keep</button>
           <button className={p.decision === "discard" ? "on-discard" : ""} onClick={() => decide.mutate(p.decision === "discard" ? "clear" : "discard")}>✕ Discard</button>
+          {p.status === "ok" && <button onClick={() => setEnhancing(true)} title="Upscale with a neural network (new file; original untouched)">✨ Enhance</button>}
           <a className="btn" href={`/api/photos/${p.id}/original`} target="_blank" rel="noreferrer">Open original</a>
         </div>
       </div>
       {p.status === "error" && <div className="callout error" style={{ marginBottom: 12 }}>Could not decode: {p.error}</div>}
+      {p.status === "removed" && (
+        <div className="callout warn" style={{ marginBottom: 12 }}>
+          This photo was moved to <Link to="/quarantine">quarantine</Link>. Restore its batch to bring it back.
+        </div>
+      )}
+      {enhancing && <EnhanceModal fileIds={[p.id]} onClose={() => setEnhancing(false)} />}
 
       <div className="detail">
         <div className="stack">

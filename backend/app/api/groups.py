@@ -135,18 +135,56 @@ class BulkAuto(BaseModel):
     tier: str
 
 
+AUTO_TIERS = ("exact", "duplicate")
+
+
+def decide_groups(tiers: list[str], dry_run: bool = False) -> dict:
+    """Keep the best copy and discard the rest in every *undecided* group of the given tiers.
+
+    Only exact and duplicate tiers are allowed (near/similar/text need a human). Decisions that existed
+    before this call are never overwritten, and a group containing any of them is left alone.
+    Duplicate groups (supersets of exact groups) are handled first, so one best copy is kept per cluster.
+    With dry_run nothing is written. Returns counts and the file ids marked.
+    """
+    bad = [t for t in tiers if t not in AUTO_TIERS]
+    if bad:
+        raise ValueError(f"Automatic decisions are only allowed for exact and duplicate groups (got {bad})")
+    conn = db.get()
+    q = ",".join("?" * len(tiers)) or "''"
+    groups = conn.execute(f"SELECT id, rep_file_id FROM groups WHERE tier IN ({q}) ORDER BY tier='exact', id", tiers).fetchall()
+    members = {g["id"]: [r[0] for r in conn.execute("SELECT file_id FROM group_members WHERE group_id=?", (g["id"],))] for g in groups}
+    pre = set(decisions_for(sorted({i for ids in members.values() for i in ids})))
+    now: dict[int, str] = {}
+    n = 0
+    for g in groups:
+        ids = members[g["id"]]
+        if pre.intersection(ids) or all(i in now for i in ids):
+            continue
+        rep = g["rep_file_id"]
+        if now.get(rep) == "discard":
+            continue                         # never let a group end up fully discarded
+        now.setdefault(rep, "keep")
+        for i in ids:
+            now.setdefault(i, "discard")
+        n += 1
+    kept = [i for i, d in now.items() if d == "keep"]
+    discarded = [i for i, d in now.items() if d == "discard"]
+    if not dry_run:
+        _apply(kept, "keep")
+        _apply(discarded, "discard")
+    return {"groups_decided": n, "kept": kept, "discarded": discarded}
+
+
+def preview_decide(tiers: list[str]) -> dict:
+    """What decide_groups would do, without writing anything."""
+    return decide_groups(tiers, dry_run=True)
+
+
 @router.post("/groups/auto-decide-tier")
 def auto_decide_tier(body: BulkAuto):
     """Auto-decide every *undecided* group of a tier. Existing decisions are never overwritten."""
-    if body.tier not in ("exact", "duplicate"):
+    try:
+        r = decide_groups([body.tier])
+    except ValueError:
         raise HTTPException(400, "Bulk auto-decide is only offered for exact and duplicate tiers")
-    conn = db.get()
-    n = 0
-    for g in conn.execute("SELECT id, rep_file_id FROM groups WHERE tier=?", (body.tier,)).fetchall():
-        ids = [r[0] for r in conn.execute("SELECT file_id FROM group_members WHERE group_id=?", (g["id"],))]
-        if decisions_for(ids):
-            continue
-        _apply([g["rep_file_id"]], "keep")
-        _apply([i for i in ids if i != g["rep_file_id"]], "discard")
-        n += 1
-    return {"groups_decided": n}
+    return {"groups_decided": r["groups_decided"]}

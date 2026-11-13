@@ -7,7 +7,7 @@ import { DecisionBadge, Thumb } from "../components/ui";
 import { DATE_SOURCE_LABEL, num, TIER_INFO } from "../format";
 
 const PAGE = 300;
-const FILTER_KEYS = ["q", "text", "has_text", "ext", "year", "camera", "source", "tier", "decision", "has_date", "status", "sort", "order"] as const;
+const FILTER_KEYS = ["q", "text", "has_text", "person_id", "ext", "year", "camera", "source", "tier", "decision", "has_date", "status", "sort", "order"] as const;
 
 const GridList = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>((props, ref) => (
   <div ref={ref} {...props} className="grid-list" />
@@ -31,6 +31,7 @@ export default function Library() {
     setSp(n, { replace: true });
   };
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats });
+  const { data: people } = useQuery({ queryKey: ["people"], queryFn: () => api.people() });
 
   const q = useInfiniteQuery({
     queryKey: ["photos", params],
@@ -65,6 +66,12 @@ export default function Library() {
           <option value="true">Contains text</option>
           <option value="false">No text</option>
         </select>
+        {!!people?.people.length && (
+          <select value={params.person_id ?? ""} onChange={(e) => set("person_id", e.target.value)} aria-label="Person">
+            <option value="">Anyone</option>
+            {people.people.map((p) => <option key={p.id} value={p.id}>{p.name ?? `Person ${p.id}`} ({num(p.photos)})</option>)}
+          </select>
+        )}
         <select value={params.ext ?? ""} onChange={(e) => set("ext", e.target.value)} aria-label="Format">
           <option value="">All formats</option>
           {stats?.formats.map((f) => <option key={f.key} value={f.key}>{f.key.toUpperCase()} ({num(f.count)})</option>)}

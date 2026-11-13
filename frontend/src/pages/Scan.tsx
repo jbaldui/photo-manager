@@ -10,6 +10,7 @@ const STAGE_HELP: Record<string, string> = {
   analyze: "Reads each file once: SHA-256, EXIF/metadata, 4 perceptual hashes (pHash, dHash, wHash, colour) and a thumbnail.",
   embed: "Runs the CLIP neural network on every unique image. Slowest step on CPU; it resumes where it stopped.",
   ocr: "Reads text inside images (OCR). Images most likely to contain text (screenshots, memes, documents) go first; resumes where it stopped.",
+  faces: "Finds faces (YuNet) and recognises them (SFace), then groups them into people. Runs locally; resumes where it stopped.",
   pairs: "Finds candidate pairs with hash and CLIP indices, then confirms edits with ORB keypoint matching.",
   group: "Builds the exact / duplicate / edited / similar groups.",
 };
@@ -20,6 +21,7 @@ export default function Scan() {
   const [err, setErr] = useState<string | null>(null);
   const [withClip, setWithClip] = useState(true);
   const [withOcr, setWithOcr] = useState(true);
+  const [withFaces, setWithFaces] = useState(true);
   const roots = useQuery({ queryKey: ["roots"], queryFn: api.roots, refetchInterval: 5000 });
   const { data: scan } = useScanStatus();
   const errors = useQuery({ queryKey: ["errors"], queryFn: api.errors });
@@ -33,7 +35,20 @@ export default function Scan() {
     },
     onError: (e: Error) => setErr(e.message),
   });
-  const remove = useMutation({ mutationFn: api.removeRoot, onSuccess: () => qc.invalidateQueries() });
+  const [removed, setRemoved] = useState<string | null>(null);
+  const remove = useMutation({
+    mutationFn: api.removeRoot,
+    onSuccess: (r) => {
+      setErr(null);
+      setRemoved(
+        `Removed ${num(r.removed.files)} files from the library` +
+          (r.removed.images ? `, plus ${num(r.removed.images)} images that existed only in that folder` : "") +
+          ". Duplicate groups were rebuilt.",
+      );
+      qc.invalidateQueries();
+    },
+    onError: (e: Error) => setErr(e.message),
+  });
   const start = useMutation({
     mutationFn: (stages?: string[]) => api.startScan(stages),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["scan-status"] }),
@@ -41,8 +56,8 @@ export default function Scan() {
   });
 
   const running = !!scan?.running;
-  const allStages = ["scan", "analyze", "embed", "ocr", "pairs", "group"];
-  const chosen = allStages.filter((s) => (s !== "embed" || withClip) && (s !== "ocr" || withOcr));
+  const allStages = ["scan", "analyze", "embed", "ocr", "faces", "pairs", "group"];
+  const chosen = allStages.filter((s) => (s !== "embed" || withClip) && (s !== "ocr" || withOcr) && (s !== "faces" || withFaces));
 
   return (
     <div className="page">
@@ -53,6 +68,7 @@ export default function Scan() {
         </div>
       </div>
       {err && <div className="callout error" style={{ marginBottom: 12 }}>{err}</div>}
+      {removed && <div className="callout" style={{ marginBottom: 12 }}>{removed}</div>}
 
       <div className="stack">
         <div className="card">
@@ -82,8 +98,16 @@ export default function Scan() {
                       <button
                         className="small danger"
                         disabled={running}
-                        title="Forget this folder in the app (files on disk are not touched)"
-                        onClick={() => confirm(`Remove ${r.path} from the library?\nFiles on disk are NOT touched.`) && remove.mutate(r.id)}
+                        title="Remove this folder and everything found in it from the library (files on disk are not touched)"
+                        onClick={() =>
+                          confirm(
+                            `Remove ${r.path} from the library?\n\n` +
+                              `• Its ${num(r.files)} photos disappear from the library, duplicate groups and search\n` +
+                              `• Photos in other folders stop being listed as duplicates of them\n` +
+                              `• Keep/discard marks for this folder are forgotten\n\n` +
+                              `Your files on disk are NOT touched.`,
+                          ) && remove.mutate(r.id)
+                        }
                       >
                         Remove
                       </button>
@@ -108,12 +132,23 @@ export default function Scan() {
               <input type="checkbox" checked={withOcr} onChange={(e) => setWithOcr(e.target.checked)} disabled={running} />
               OCR (text search, same-text groups)
             </label>
+            <label className="row" style={{ fontSize: 13, color: "var(--text-2)" }}>
+              <input type="checkbox" checked={withFaces} onChange={(e) => setWithFaces(e.target.checked)} disabled={running} />
+              Faces (find photos by person)
+            </label>
             {running ? (
               <button className="danger" onClick={() => api.cancelScan().then(() => qc.invalidateQueries({ queryKey: ["scan-status"] }))}>
                 Stop
               </button>
             ) : (
               <>
+                <button
+                  disabled={!roots.data?.length}
+                  onClick={() => start.mutate(["scan", "group"])}
+                  title="Fast: only checks which files were added, moved or deleted outside the app (e.g. in your file manager) and updates the groups"
+                >
+                  Check for moved/deleted files
+                </button>
                 <button onClick={() => start.mutate(["pairs", "group"])} title="Re-run matching with the current settings">
                   Re-run grouping
                 </button>

@@ -1,8 +1,8 @@
-import { useEffect, useRef } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import { num } from "./format";
+import { useJobWatcher } from "./hooks";
 import Dashboard from "./pages/Dashboard";
 import Library from "./pages/Library";
 import Groups from "./pages/Groups";
@@ -12,27 +12,31 @@ import Search from "./pages/Search";
 import Scan from "./pages/Scan";
 import Settings from "./pages/Settings";
 import Organize from "./pages/Organize";
+import AutoProcess from "./pages/AutoProcess";
+import Quarantine from "./pages/Quarantine";
+import Enhanced from "./pages/Enhanced";
+import People from "./pages/People";
 
-export function useScanStatus() {
-  const qc = useQueryClient();
-  const q = useQuery({
-    queryKey: ["scan-status"],
-    queryFn: api.scanStatus,
-    refetchInterval: (query) => (query.state.data?.running ? 1000 : 5000),
-  });
-  // When a run finishes, refresh everything derived from the DB.
-  const wasRunning = useRef(false);
-  useEffect(() => {
-    const running = !!q.data?.running;
-    if (wasRunning.current && !running) qc.invalidateQueries({ predicate: (x) => x.queryKey[0] !== "scan-status" });
-    wasRunning.current = running;
-  }, [q.data?.running, qc]);
-  return q;
+export const useScanStatus = () => useJobWatcher("scan-status", api.scanStatus);
+
+function MiniProgress({ to, title, frac, message }: { to: string; title: string; frac: number | null; message?: string }) {
+  return (
+    <NavLink to={to} className="mini-progress" style={{ textDecoration: "none" }}>
+      <div style={{ fontWeight: 600, color: "var(--text)" }}>{title}</div>
+      <div className="meter" style={{ margin: "6px 0" }}>
+        <div style={{ width: frac != null ? `${100 * frac}%` : "30%" }} />
+      </div>
+      {message && <div>{message}</div>}
+    </NavLink>
+  );
 }
 
 export default function App() {
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: api.stats });
   const { data: scan } = useScanStatus();
+  const { data: removal } = useJobWatcher("removal-status", api.removalStatus, true);
+  const { data: auto } = useJobWatcher("auto-status", api.autoStatus, true);
+  const { data: enh } = useJobWatcher("enhance-status", api.enhanceStatus);
   const dupCount = (stats?.tiers.exact?.groups ?? 0) + (stats?.tiers.duplicate?.groups ?? 0) + (stats?.tiers.near?.groups ?? 0);
   const cur = scan?.current ? scan.stages[scan.current] : null;
 
@@ -55,21 +59,38 @@ export default function App() {
           <NavLink to="/groups">
             Duplicates <span className="count">{stats ? num(dupCount) : ""}</span>
           </NavLink>
+          <NavLink to="/people">People</NavLink>
           <NavLink to="/search">Search</NavLink>
           <NavLink to="/organize">Organize</NavLink>
+          <NavLink to="/auto">Auto Process</NavLink>
+          <NavLink to="/quarantine">
+            Quarantine <span className="count">{stats?.removed ? num(stats.removed) : ""}</span>
+          </NavLink>
+          <NavLink to="/enhanced">Enhanced</NavLink>
           <NavLink to="/scan">Folders &amp; scan</NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </nav>
         <div className="spacer" />
-        {scan?.running && cur && (
-          <NavLink to="/scan" className="mini-progress" style={{ textDecoration: "none" }}>
-            <div style={{ fontWeight: 600, color: "var(--text)" }}>{cur.label}</div>
-            <div className="meter" style={{ margin: "6px 0" }}>
-              <div style={{ width: cur.total ? `${(100 * cur.processed) / cur.total}%` : "30%" }} />
-            </div>
-            <div>{cur.message}</div>
-          </NavLink>
+        {auto?.running && (
+          <MiniProgress
+            to="/auto"
+            title={`Auto: ${auto.name}`}
+            frac={auto.steps ? auto.steps.filter((x) => x.status === "done").length / Math.max(1, auto.steps.filter((x) => x.status !== "skipped").length) : null}
+            message={auto.steps?.find((x) => x.status === "running")?.message}
+          />
         )}
+        {scan?.running && cur && !auto?.running && (
+          <MiniProgress to="/scan" title={cur.label} frac={cur.total ? cur.processed / cur.total : null} message={cur.message} />
+        )}
+        {removal?.running && !auto?.running && (
+          <MiniProgress
+            to="/quarantine"
+            title={removal.mode === "restore" ? "Restoring from quarantine" : "Moving to quarantine"}
+            frac={removal.total ? (removal.done ?? 0) / removal.total : null}
+            message={`${num(removal.done)} / ${num(removal.total)}`}
+          />
+        )}
+        {enh?.running && <MiniProgress to="/enhanced" title="Enhancing" frac={enh.progress ?? null} message={enh.message} />}
       </aside>
       <main className="main">
         <Routes>
@@ -78,10 +99,14 @@ export default function App() {
           <Route path="/groups" element={<Groups />} />
           <Route path="/groups/:id" element={<GroupDetail />} />
           <Route path="/photo/:id" element={<PhotoPage />} />
+          <Route path="/people" element={<People />} />
           <Route path="/search" element={<Search />} />
           <Route path="/scan" element={<Scan />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/organize" element={<Organize />} />
+          <Route path="/auto" element={<AutoProcess />} />
+          <Route path="/quarantine" element={<Quarantine />} />
+          <Route path="/enhanced" element={<Enhanced />} />
         </Routes>
       </main>
     </div>

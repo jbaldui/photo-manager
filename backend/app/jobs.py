@@ -6,13 +6,14 @@ import threading
 import time
 import traceback
 
-from . import candidates, db, embed, grouping, ocr, scanner
+from . import candidates, db, embed, faces, grouping, ocr, scanner
 
 STAGES = [
     ("scan", "Scanning folders"),
     ("analyze", "Metadata, SHA-256, perceptual hashes, thumbnails"),
     ("embed", "CLIP embeddings"),
     ("ocr", "OCR: text in images"),
+    ("faces", "Faces: detect and group people"),
     ("pairs", "Candidate pairs + ORB verification"),
     ("group", "Grouping"),
 ]
@@ -97,6 +98,7 @@ class Runner:
             "analyze": scanner.analyze_pending,
             "embed": embed.embed_pending,
             "ocr": ocr.ocr_pending,
+            "faces": faces.faces_pending,
             "pairs": candidates.build_pairs,
             "group": grouping.build_groups,
         }
